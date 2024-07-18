@@ -1,0 +1,192 @@
+import time
+import re
+import random
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.keys import Keys
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
+#7/1718:37速度改善gbp_dev
+# 入力ファイルと出力ファイルのパスを定義します
+input_file = "C:\\Users\\USER\\Desktop\\PhoneNumberList.csv"
+output_file = "C:\\Users\\USER\\Desktop\\matuosantestgbp0706.csv"
+
+# CSVファイルから電話番号を読み取る関数を定義します
+def read_csv(file_path):
+    df = pd.read_csv(file_path)
+    phone_numbers = df['phone_number'].dropna().tolist()
+    print(f"{len(phone_numbers)}件の電話番号の読み込みができたにゃ(=^・^=)！")
+    return phone_numbers
+
+# Google検索からビジネス情報を取得する関数を定義します
+def fetch_business_info(driver, phone_number):
+    driver.get("https://www.google.co.jp/")
+    time.sleep(random.uniform(0.01, 0.014))  # ランダムな待機時間
+    search_box = driver.find_element(By.NAME, 'q')  # 検索ボックスを取得
+    search_box.click()
+    time.sleep(random.uniform(0.012, 0.013))  # ランダムな待機時間
+    search_box.send_keys(phone_number)
+    time.sleep(random.uniform(0.01, 0.018))  # ランダムな待機時間
+    search_box.send_keys(Keys.ENTER)
+    time.sleep(random.uniform(1, 2))  # ランダムな待機時間
+
+    business_info = {}
+    try:
+        # Nameの取得のために複数の方法を試します
+        business_info['Name'] = driver.find_element(By.XPATH, '//*[@id="Sva75c"]/div[2]/div[2]/div/div[2]/c-wiz/div/c-wiz[1]/c-wiz/c-wiz/c-wiz[1]/div/div/div[2]/div[1]/div/div/h3').text
+    except Exception as e:
+        print(f"Name not found via XPath method 1 for {phone_number}: {e}")
+        try:
+            business_info['Name'] = driver.find_element(By.XPATH, '/html/body/div[8]/div/div/div/div/div/div/c-wiz/div/div[2]/div[2]/div/div[2]/c-wiz/div/c-wiz[1]/c-wiz/c-wiz/c-wiz[1]/div/div/div[2]/div[1]/div/div/h3').text
+        except Exception as e:
+            print(f"Name not found via XPath method 2 for {phone_number}: {e}")
+            try:
+                business_info['Name'] = driver.find_element(By.CSS_SELECTOR, 'h3').text
+            except Exception as e:
+                print(f"Name not found for {phone_number}: {e}")
+                business_info['Name'] = ''
+   
+    try:
+        business_info['Rating'] = driver.find_element(By.CSS_SELECTOR, 'span.Aq14fc').text
+    except Exception as e:
+        print(f"Rating not found for {phone_number}: {e}")
+        business_info['Rating'] = ''
+    try:
+        business_info['Reviews Count'] = driver.find_element(By.CSS_SELECTOR, '.hqzQac span span').text
+    except Exception as e:
+        print(f"Reviews Count not found for {phone_number}: {e}")
+        business_info['Reviews Count'] = ''
+    try:
+        business_info['Address'] = driver.find_element(By.CSS_SELECTOR, 'span.LrzXr').text
+    except Exception as e:
+        print(f"Address not found for {phone_number}: {e}")
+        business_info['Address'] = ''
+    try:
+        business_info['Phone'] = driver.find_element(By.CSS_SELECTOR, 'span.LrzXr.zdqRlf.kno-fv').text
+    except Exception as e:
+        print(f"Phone not found for {phone_number}: {e}")
+        business_info['Phone'] = ''
+    try:
+        # BeautifulSoupでページを解析
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        hours_table = soup.find('table', {'class': 'WgFkxc'})  # 営業時間の表を見つける
+        hours = "\n".join([row.text for row in hours_table.find_all('tr')])  # 営業時間を取得
+        business_info['Hours'] = hours
+    except Exception as e:
+        print(f"Hours not found for {phone_number}: {e}")
+        business_info['Hours'] = ''
+    try:
+        business_info['Website'] = driver.find_element(By.CSS_SELECTOR, 'a.ab_button').get_attribute('href')
+    except Exception as e:
+        print(f"Website not found for {phone_number}: {e}")
+        business_info['Website'] = ''
+   
+    # 予算情報を取得する処理
+    try:
+        # 検索結果のHTMLを解析するためにBeautifulSoupを使用
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        # 予算情報を含む可能性のある要素を見つける
+        budget_element = soup.find('span', text=re.compile(r'￥\d+～￥\d+'))
+        business_info['Budget'] = budget_element.text if budget_element else ''
+    except Exception as e:
+        print(f"Budget not found for {phone_number}: {e}")
+        business_info['Budget'] = ''
+   
+    # 業種情報を取得する処理
+    try:
+        business_info['Category'] = driver.find_element(By.CSS_SELECTOR, 'span.YhemCb').text
+    except Exception as e:
+        print(f"Category not found for {phone_number}: {e}")
+        business_info['Category'] = ''
+   
+    # 正確な業種情報を抽出
+    try:
+        category_info = driver.find_element(By.XPATH, '//*[@id="yDmH0d"]/c-wiz[3]/div/div/div[2]/div/div[1]/div[3]/div[1]/span[3]/span[3]').text
+        business_info['Category'] = category_info
+    except Exception as e:
+        print(f"Category (XPath specific) not found for {phone_number}: {e}")
+   
+    # Categoryに予算と業種を連結
+    if business_info['Budget'] and business_info['Category']:
+        business_info['Category'] = f"{business_info['Category']} ({business_info['Budget']})"
+    elif business_info['Budget']:
+        business_info['Category'] = business_info['Budget']
+
+    # 業種をさらに判定する処理を追加
+    categories = ["ファーストフード", "花屋", "居酒屋", "整体", "パン屋", "ラーメン", "焼肉", "コーヒーショップ", "ハンバーガー", "カフェ", "理容", "美容","小売り","フラワーショップ"]
+    detected_category = None
+    try:
+        category_elements = driver.find_elements(By.CSS_SELECTOR, 'div.yuRUbf a h3')
+        for element in category_elements:
+            for category in categories:
+                if category in element.text:
+                    detected_category = category
+                    break
+            if detected_category:
+                break
+    except:
+        pass
+
+    # 見つかった業種を追加
+    if detected_category:
+        business_info['Category'] = detected_category
+
+    return business_info
+
+# 住所から郵便番号を抽出する関数を定義します
+def extract_post_code(address):
+    match = re.search(r'〒?\d{3}-\d{4}', address)
+    return match.group(0) if match else ''
+
+# CSVファイルにデータを書き込む関数を定義します
+def write_to_csv(output_path, headers, data):
+    df = pd.DataFrame(data, columns=headers)
+    df.to_csv(output_path, index=False, encoding='utf-8-sig')
+
+# メイン関数を定義します
+def main():
+    phone_numbers = read_csv(input_file)
+    options = webdriver.ChromeOptions()
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+    headers = ["Name", "Rating", "Reviews Count", "Address", "Post Code", "Phone", "Hours", "Website", "Category"]
+    extracted_data = []
+
+    for phone_number in phone_numbers:
+        retries = 3  # 再試行回数を定義
+        business_info = {}
+        for attempt in range(retries):
+            business_info = fetch_business_info(driver, phone_number)
+            if business_info.get("Name"):
+                break  # 名前が取得できた場合、ループを抜ける
+            print(f"Retry {attempt + 1} for {phone_number}")
+            time.sleep(random.uniform(2, 5))  # 再試行前にランダムな待機時間
+
+        address = business_info.get("Address", "")
+        post_code = extract_post_code(address)
+        address = address.replace(post_code, '').strip()
+        extracted_data.append([
+            business_info.get("Name", ""),
+            business_info.get("Rating", ""),
+            business_info.get("Reviews Count", ""),
+            address,
+            post_code,
+            business_info.get("Phone", ""),
+            business_info.get("Hours", ""),
+            business_info.get("Website", ""),
+            business_info.get("Category", "")
+        ])
+
+    write_to_csv(output_file, headers, extracted_data)
+
+    driver.quit()
+
+# メイン関数を実行
+if __name__ == "__main__":
+    main()
+
+print("CSVファイルに抽出結果が出力されたにゃー(=^・^=)。")
+#高橋さん＆松尾さんへ7/16_16:33Googleビジネスプロフィールのコードで３回トライしてね、NULLのときにというコードで7月１７日に速度上げにトライ中_速度遅いVERと欠損値同じで
+#13県ダミーデータで１分５０秒くらい
